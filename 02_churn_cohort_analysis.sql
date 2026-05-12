@@ -55,3 +55,41 @@ SELECT
 FROM monthly_churn
 ORDER BY plan_tier, churn_month;
 GO
+
+-- Create view for Power BI
+CREATE OR ALTER VIEW vw_cohort_retention AS
+WITH cohorts AS (
+    SELECT
+        customer_id,
+        DATEFROMPARTS(YEAR(signup_date), MONTH(signup_date), 1) AS cohort_month,
+        plan_tier,
+        signup_date,
+        churn_date,
+        is_churned
+    FROM customers
+),
+months AS (
+    SELECT DISTINCT DATEFROMPARTS(YEAR(signup_date), MONTH(signup_date), 1) AS cohort_month
+    FROM customers
+),
+periods AS (
+    SELECT value AS months_since_signup
+    FROM GENERATE_SERIES(0, 18)
+)
+SELECT
+    c.cohort_month,
+    p.months_since_signup,
+    c.plan_tier,
+    COUNT(*) AS cohort_size,
+    COUNT(CASE
+        WHEN DATEDIFF(MONTH, c.signup_date, ISNULL(c.churn_date, '2024-06-30')) >= p.months_since_signup
+        THEN 1
+    END) AS retained_count,
+    CAST(COUNT(CASE
+        WHEN DATEDIFF(MONTH, c.signup_date, ISNULL(c.churn_date, '2024-06-30')) >= p.months_since_signup
+        THEN 1
+    END) AS FLOAT) / COUNT(*) * 100 AS retention_pct
+FROM cohorts c
+CROSS JOIN periods p
+GROUP BY c.cohort_month, p.months_since_signup, c.plan_tier;
+GO
