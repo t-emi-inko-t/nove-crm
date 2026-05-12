@@ -93,3 +93,6 @@ FROM cohorts c
 CROSS JOIN periods p
 GROUP BY c.cohort_month, p.months_since_signup, c.plan_tier;
 GO
+
+-- Quick test: SELECT TOP 10 * FROM vw_cohort_retention...
+-- SELECT TOP 10 * FROM vw_cohort_retention ORDER BY cohort_month, months_since_signup;
