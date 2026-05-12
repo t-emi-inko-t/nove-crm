@@ -35,3 +35,23 @@ SELECT
 FROM retention
 ORDER BY cohort_month, plan_tier;
 GO
+
+-- Churn acceleration using LAG
+WITH monthly_churn AS (
+    SELECT
+        DATEFROMPARTS(YEAR(churn_date), MONTH(churn_date), 1) AS churn_month,
+        plan_tier,
+        COUNT(*) AS churned_count
+    FROM customers
+    WHERE is_churned = 1 AND churn_date IS NOT NULL
+    GROUP BY DATEFROMPARTS(YEAR(churn_date), MONTH(churn_date), 1), plan_tier
+)
+SELECT
+    churn_month,
+    plan_tier,
+    churned_count,
+    LAG(churned_count) OVER (PARTITION BY plan_tier ORDER BY churn_month) AS prev_month_churn,
+    churned_count - LAG(churned_count) OVER (PARTITION BY plan_tier ORDER BY churn_month) AS churn_acceleration
+FROM monthly_churn
+ORDER BY plan_tier, churn_month;
+GO
