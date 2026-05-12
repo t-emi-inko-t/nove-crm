@@ -96,3 +96,5 @@ SELECT
 FROM cac_by_channel cac
 LEFT JOIN ltv_by_channel ltv ON cac.channel = ltv.channel;
 GO
+
+SELECT * FROM vw_unit_economics;
