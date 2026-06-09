@@ -78,7 +78,7 @@ GROUP BY la.channel
 ORDER BY attributed_revenue DESC;
 GO
 
--- Time-decay attribution
+-- Time-decay attribution (Protected against divide-by-zero)
 CREATE OR ALTER VIEW vw_attribution_comparison AS
 WITH customer_revenue AS (
     SELECT customer_id, SUM(amount) AS total_revenue
@@ -101,7 +101,8 @@ normalized_decay AS (
     SELECT
         customer_id,
         channel,
-        decay_weight / SUM(decay_weight) OVER (PARTITION BY customer_id) AS normalized_weight
+        -- Guard against sum underflow by converting 0 to NULL
+        decay_weight / NULLIF(SUM(decay_weight) OVER (PARTITION BY customer_id), 0) AS normalized_weight
     FROM touch_with_decay
 ),
 -- First touch
@@ -143,8 +144,9 @@ GROUP BY lt.channel
 UNION ALL
 
 SELECT 'Linear', mt.channel,
-    SUM(cr.total_revenue * (1.0 / tc.total_touches)),
-    CAST(SUM(1.0 / tc.total_touches) AS INT)
+    -- Guard linear model division as well
+    SUM(cr.total_revenue * (1.0 / NULLIF(tc.total_touches, 0))),
+    CAST(SUM(1.0 / NULLIF(tc.total_touches, 0)) AS INT)
 FROM marketing_touchpoints mt
 INNER JOIN customer_revenue cr ON mt.customer_id = cr.customer_id
 INNER JOIN touch_counts tc ON mt.customer_id = tc.customer_id
@@ -159,3 +161,6 @@ FROM normalized_decay nd
 INNER JOIN customer_revenue cr ON nd.customer_id = cr.customer_id
 GROUP BY nd.channel;
 GO
+
+
+SELECT * FROM vw_attribution_comparison ORDER BY attribution_model, attributed_revenue DESC;
