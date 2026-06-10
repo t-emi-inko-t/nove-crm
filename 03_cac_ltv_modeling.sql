@@ -98,3 +98,58 @@ LEFT JOIN ltv_by_channel ltv ON cac.channel = ltv.channel;
 GO
 
 SELECT * FROM vw_unit_economics;
+
+
+
+USE NovaCRM;
+GO
+
+CREATE OR ALTER VIEW vw_unit_economics AS
+WITH cac_by_channel AS (
+    SELECT
+        mt.channel,
+        c.plan_tier,
+        SUM(mt.cost) AS total_spend,
+        COUNT(DISTINCT mt.customer_id) AS customers_acquired,
+        CASE
+            WHEN COUNT(DISTINCT mt.customer_id) > 0
+            THEN SUM(mt.cost) / COUNT(DISTINCT mt.customer_id)
+            ELSE 0
+        END AS cac
+    FROM marketing_touchpoints mt
+    INNER JOIN customers c ON mt.customer_id = c.customer_id
+    GROUP BY mt.channel, c.plan_tier
+),
+ltv_by_channel AS (
+    SELECT
+        mt.channel,
+        cltv.plan_tier,
+        AVG(cltv.total_revenue) AS avg_ltv
+    FROM (
+        SELECT
+            c.customer_id,
+            c.plan_tier,
+            SUM(re.amount) AS total_revenue
+        FROM customers c
+        INNER JOIN revenue_events re ON c.customer_id = re.customer_id
+        GROUP BY c.customer_id, c.plan_tier
+    ) cltv
+    INNER JOIN marketing_touchpoints mt ON cltv.customer_id = mt.customer_id
+    GROUP BY mt.channel, cltv.plan_tier
+)
+SELECT
+    cac.channel,
+    cac.plan_tier,
+    cac.total_spend,
+    cac.customers_acquired,
+    cac.cac,
+    ltv.avg_ltv,
+    CASE WHEN cac.cac > 0 THEN ltv.avg_ltv / cac.cac ELSE 0 END AS ltv_cac_ratio,
+    CASE
+        WHEN cac.cac > 0 AND ltv.avg_ltv / cac.cac >= 3 THEN 'Healthy'
+        WHEN cac.cac > 0 AND ltv.avg_ltv / cac.cac >= 1 THEN 'Warning'
+        ELSE 'Unhealthy'
+    END AS health_status
+FROM cac_by_channel cac
+LEFT JOIN ltv_by_channel ltv ON cac.channel = ltv.channel AND cac.plan_tier = ltv.plan_tier;
+GO
