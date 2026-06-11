@@ -53,3 +53,38 @@ df_features = df_features.merge(rev_features[['customer_id', 'total_revenue', 'd
 df_features = df_features.fillna(0)
 print(f"Features created for {len(df_features)} customers.")
 
+
+# Define features (X) and target (y)
+feature_cols = ['tenure_months', 'plan_numeric', 'plan_change_count', 'avg_mrr', 'total_revenue', 'days_since_last_payment']
+X = df_features[feature_cols]
+y = df_features['is_churned']
+
+# Train/test split (80/20)
+X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+
+# Scale features so large numbers don't drown out smaller values
+scaler = StandardScaler()
+X_train_scaled = scaler.fit_transform(X_train)
+X_test_scaled = scaler.transform(X_test)
+
+# Fit Logistic Regression
+model = LogisticRegression(random_state=42, max_iter=1000)
+model.fit(X_train_scaled, y_train)
+
+# Output evaluation metrics
+accuracy = model.score(X_test_scaled, y_test)
+print(f"Model accuracy: {accuracy:.2%}")
+
+# Generate risk scores (0-100) across ALL customers
+X_all_scaled = scaler.transform(X)
+churn_probabilities = model.predict_proba(X_all_scaled)[:, 1]
+df_features['churn_risk_score'] = (churn_probabilities * 100).astype(int)
+
+# Bin into actionable bands
+df_features['risk_band'] = pd.cut(
+    df_features['churn_risk_score'],
+    bins=[0, 30, 60, 100],
+    labels=['Low', 'Medium', 'High']
+)
+print(df_features['risk_band'].value_counts())
+
