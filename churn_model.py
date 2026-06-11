@@ -88,3 +88,31 @@ df_features['risk_band'] = pd.cut(
 )
 print(df_features['risk_band'].value_counts())
 
+
+# Create the churn_risk_scores table in local database
+cursor = conn.cursor()
+cursor.execute("IF OBJECT_ID('churn_risk_scores', 'U') IS NOT NULL DROP TABLE churn_risk_scores;")
+cursor.execute("""
+    CREATE TABLE churn_risk_scores (
+        customer_id INT PRIMARY KEY,
+        churn_risk_score INT NOT NULL,
+        risk_band NVARCHAR(10) NOT NULL,
+        scored_date DATE NOT NULL,
+        FOREIGN KEY (customer_id) REFERENCES customers(customer_id)
+    );
+""")
+
+# Insert rows
+insert_sql = "INSERT INTO churn_risk_scores (customer_id, churn_risk_score, risk_band, scored_date) VALUES (?, ?, ?, ?)"
+scored_date = '2024-06-30'
+rows = [
+    (int(row['customer_id']), int(row['churn_risk_score']), str(row['risk_band']), scored_date)
+    for _, row in df_features.iterrows()
+]
+
+cursor.executemany(insert_sql, rows)
+conn.commit()
+print(f"Inserted {len(rows)} risk scores into SQL Server successfully!")
+conn.close()
+
+
