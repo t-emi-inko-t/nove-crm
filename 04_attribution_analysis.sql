@@ -164,3 +164,95 @@ GO
 
 
 SELECT * FROM vw_attribution_comparison ORDER BY attribution_model, attributed_revenue DESC;
+
+
+
+USE NovaCRM;
+GO
+
+-- Time-decay and multi-model attribution (Sliceable by plan_tier)
+CREATE OR ALTER VIEW vw_attribution_comparison AS
+WITH customer_revenue AS (
+    SELECT customer_id, SUM(amount) AS total_revenue
+    FROM revenue_events
+    GROUP BY customer_id
+),
+touch_with_decay AS (
+    SELECT
+        mt.customer_id,
+        mt.channel,
+        mt.touchpoint_date,
+        c.signup_date,
+        DATEDIFF(DAY, mt.touchpoint_date, c.signup_date) AS days_before_conversion,
+        -- Time decay: more recent = higher weight
+        POWER(0.5, CAST(DATEDIFF(DAY, mt.touchpoint_date, c.signup_date) AS FLOAT) / 7.0) AS decay_weight
+    FROM marketing_touchpoints mt
+    INNER JOIN customers c ON mt.customer_id = c.customer_id
+),
+normalized_decay AS (
+    SELECT
+        customer_id,
+        channel,
+        -- Guard against sum underflow by converting 0 to NULL
+        decay_weight / NULLIF(SUM(decay_weight) OVER (PARTITION BY customer_id), 0) AS normalized_weight
+    FROM touch_with_decay
+),
+-- First touch
+first_touch AS (
+    SELECT customer_id, channel,
+        ROW_NUMBER() OVER (PARTITION BY customer_id ORDER BY touchpoint_date ASC) AS rn
+    FROM marketing_touchpoints
+),
+-- Last touch
+last_touch AS (
+    SELECT customer_id, channel,
+        ROW_NUMBER() OVER (PARTITION BY customer_id ORDER BY touchpoint_date DESC) AS rn
+    FROM marketing_touchpoints
+),
+-- Linear
+touch_counts AS (
+    SELECT customer_id, COUNT(*) AS total_touches
+    FROM marketing_touchpoints
+    GROUP BY customer_id
+)
+SELECT 'First Touch' AS attribution_model, ft.channel, c.plan_tier,
+    SUM(cr.total_revenue) AS attributed_revenue,
+    COUNT(DISTINCT ft.customer_id) AS attributed_customers
+FROM first_touch ft
+INNER JOIN customer_revenue cr ON ft.customer_id = cr.customer_id
+INNER JOIN customers c ON ft.customer_id = c.customer_id
+WHERE ft.rn = 1
+GROUP BY ft.channel, c.plan_tier
+
+UNION ALL
+
+SELECT 'Last Touch', lt.channel, c.plan_tier,
+    SUM(cr.total_revenue),
+    COUNT(DISTINCT lt.customer_id)
+FROM last_touch lt
+INNER JOIN customer_revenue cr ON lt.customer_id = cr.customer_id
+INNER JOIN customers c ON lt.customer_id = c.customer_id
+WHERE lt.rn = 1
+GROUP BY lt.channel, c.plan_tier
+
+UNION ALL
+
+SELECT 'Linear', mt.channel, c.plan_tier,
+    SUM(cr.total_revenue * (1.0 / NULLIF(tc.total_touches, 0))),
+    CAST(SUM(1.0 / NULLIF(tc.total_touches, 0)) AS INT)
+FROM marketing_touchpoints mt
+INNER JOIN customer_revenue cr ON mt.customer_id = cr.customer_id
+INNER JOIN touch_counts tc ON mt.customer_id = tc.customer_id
+INNER JOIN customers c ON mt.customer_id = c.customer_id
+GROUP BY mt.channel, c.plan_tier
+
+UNION ALL
+
+SELECT 'Time Decay', nd.channel, c.plan_tier,
+    SUM(cr.total_revenue * nd.normalized_weight),
+    CAST(SUM(nd.normalized_weight) AS INT)
+FROM normalized_decay nd
+INNER JOIN customer_revenue cr ON nd.customer_id = cr.customer_id
+INNER JOIN customers c ON nd.customer_id = c.customer_id
+GROUP BY nd.channel, c.plan_tier;
+GO
